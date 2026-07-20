@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.env
+config/credentials.json
+config/token.json
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
