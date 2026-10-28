@@ -28,12 +28,19 @@ people:
   docs: {account_id: "712020:8013ad17-0f53-411b-85cb-e1ceac29a04b", name: Fortune Ikechi}
   build: {account_id: "557058:7a9740cb-5bb4-4901-a696-d0815b184de2", name: Ming Ho}
   web: {account_id: "712020:3e7a9a59-7b72-450f-ab04-1ee42766d17b", name: Sathya Thothathri}
+  # Owners below were taken from the 2026 major releases in Jira (CM-1488 CBL 4.1,
+  # CM-1501 CBL 3.4, CM-1451 SGW 4.1, CM-1476 Edge Server 1.1, CM-1589 React
+  # Native 1.1, CM-1277 CBL JS); all were active Jira accounts on 2026-10-28.
+  # PM (white glove, notify platforms, licences, PM sign-off) for CBL and SGW
+  # was Iveta Dulova, whose Jira account is now deactivated, so it is left
+  # unassigned until a new owner is named. Products override it where known.
   pm: null
-  gtm: null
+  gtm: {account_id: "557058:85de7d99-f5d3-45f9-a552-e5d21ee5a33b", name: Priya Rajagopal}            # CM-1489, CM-1452, CM-1525, CM-1590, CM-1278
   support: {account_id: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4", name: Adam Fraser}
-  legal: null
-  security: null
-  compliance: null
+  legal: {account_id: "712020:f2d6ac5d-fcf4-4fc2-96f2-3fe37e4b4399", name: Eric Peh Hon Tong}        # CM-1630, CM-1633, CM-1652, CM-1319
+  security: {account_id: "712020:7c30f69c-64b3-45e5-838a-e613bf0defa8", name: Bala Krishna Alla}     # CM-1631, CM-1634, CM-1653
+  compliance: {account_id: "60be5150a01e11006ab04caa", name: Adnan Mahmood}                           # CM-1632, CM-1635, CM-1654, CM-1651, CM-1626
+  threat_modelling: {account_id: "712020:195ee5c6-98ab-447c-b852-cca7e5c287c3", name: Rimpa Biswas}  # CM-1657, CM-1656, CM-1655
 
 platforms:
   android: Android
@@ -80,6 +87,8 @@ products:
     match: '^CBL\s*JS'
     platforms: [js]
     process_owners: Sathya Thothathri
+    owners:
+      security: {account_id: "63cfc5288dd199a03e10dffc", name: Istvan Orban}                          # CM-1321
     tasks:
       maintenance: [qe_signoff, documentation, publish_builds, web_updates]
       major: *major_tasks
@@ -92,6 +101,11 @@ products:
     match: '^CBL[- ]React Native|^CBL Release Ticket React Native'
     platforms: [react_native]
     process_owners: Sathya Thothathri
+    owners:
+      pm: {account_id: "712020:9241324f-d22f-4945-b296-cba0634a8f01", name: Niranjan Subramanian}    # CM-1594..1596, CM-1813
+      legal: {account_id: "712020:87bd11eb-bb3b-4745-8afe-a6676176a799", name: Genesis Tejeda}       # CM-1627
+      security: {account_id: "63cfc5288dd199a03e10dffc", name: Istvan Orban}                          # CM-1628
+      threat_modelling: {account_id: "712020:cb8f793f-a47d-4683-aca0-fd0ef669edca", name: Balaji PR}  # CM-1629
     tasks:
       maintenance: [qe_signoff, documentation, publish_builds, web_updates, pm_signoff]
       major: *major_tasks
@@ -119,6 +133,9 @@ products:
     process_owners: Sathya Thothathri
     owners:
       qe: {account_id: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4", name: Adam Fraser}
+      pm: {account_id: "557058:85de7d99-f5d3-45f9-a552-e5d21ee5a33b", name: Priya Rajagopal}         # CM-1527, CM-1528, CM-1529
+      legal: {account_id: "712020:87bd11eb-bb3b-4745-8afe-a6676176a799", name: Genesis Tejeda}       # CM-1649
+      security: {account_id: "63cfc5288dd199a03e10dffc", name: Istvan Orban}                          # CM-1650
     tasks:
       maintenance: [qe_signoff, perf_signoff, documentation, publish_builds, web_updates]
       major: *major_tasks
@@ -302,5 +319,5 @@ tasks:
 
   threat_modelling:
     summary: Threat Modelling
-    owner: security
+    owner: threat_modelling
     due_offset_days: 30

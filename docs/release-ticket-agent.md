@@ -145,16 +145,20 @@ platform-specific and full releases.
 1. **Connector:** each TPM connects the Atlassian connector in Claude (Settings
    -> Connectors) with their own Jira login. Their Jira permissions apply: they
    need create rights in `CM`.
-2. **Skill:**
-   - Run `python scripts/build_skill.py` and upload `dist/release-tickets.zip`
-     in Claude (Settings -> Capabilities -> Skills), or have an org admin add
-     it as an organisation skill so every TPM gets it.
-   - In Claude Code inside this repo, the skill is picked up automatically
-     from `.claude/skills/`.
-   - Code execution must be enabled, because the skill runs a Python script.
-3. **Owners:** fill in the `null` owners in `config/release_catalog.yaml` (PM,
-   GTM, legal, security, compliance), or those tasks are created unassigned
-   and flagged.
+2. **Skill:** publish it to the organisation plugin library so every TPM can
+   install it: run `python scripts/build_skill.py --plugin-dir <folder outside the repo>`
+   and publish that folder. Alternatively, upload `dist/release-tickets.zip`
+   as a personal skill (Settings -> Capabilities -> Skills). In Claude Code
+   inside this repo, the skill is picked up automatically from
+   `.claude/skills/`. Code execution must be enabled, because the skill runs
+   a Python script.
+3. **Owners:** these are filled in from the 2026 major releases in Jira. The
+   source tickets are cited in `config/release_catalog.yaml`, and every owner
+   was an active Jira account on 2026-10-28. The exception is **PM for CBL, CBL
+   JS, CBL Vector Search and SGW**: the previous owner's Jira account is
+   deactivated, so those tasks (White Glove Testing, Notify Changes to
+   Platforms, Licences) are created unassigned and flagged until a new owner
+   is set under `people.pm`.
 4. **Pilot:** ask for one maintenance release, compare it with a hand-made one,
    and then make the skill the standard way to create release tickets.
 
