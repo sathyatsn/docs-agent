@@ -109,3 +109,27 @@ See `.env.example` for all configuration options. Key settings:
 | `CLAUDE_MODEL` | Claude model for summarization | claude-sonnet-5 |
 | `OUTPUT_FOLDER_ID` | Drive folder for new docs | Root |
 | `GEMINI_NOTES_FOLDER_ID` | Where Gemini saves notes | All Drive |
+
+---
+
+# Release Ticket Agent
+
+Creates the Jira release epic and its child tasks in `CM` (QE, Perf, Docs,
+Publish Builds, Web Updates, plus the full GA checklist for major releases)
+for every mobile product and platform: Couchbase Lite (Android, iOS, Java,
+C, .NET), CBL Vector Search, CBL JS, CBL React Native, Sync Gateway and Edge
+Server. Ticket content comes from `config/release_catalog.yaml`. Runs are
+dry runs unless you pass `--apply`. Re-running never creates duplicates and
+only fills in missing tickets.
+
+```bash
+pip install -r requirements.txt
+python release_agent.py create --product sgw --version 4.1.4 --ga 2026-12-10          # dry run
+python release_agent.py create --product cbl --version 3.4.4 --platforms dotnet --apply
+python release_agent.py train releases/example-train.yaml --show-descriptions
+python release_agent.py intake "SGW 4.1.4 and 4.0.10 GA Dec 10"
+python release_agent.py audit
+```
+
+Design, decisions and rollout plan: [docs/release-ticket-agent.md](docs/release-ticket-agent.md).
+Tests: `pip install -r requirements-dev.txt && pytest`.

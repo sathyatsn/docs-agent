@@ -1,0 +1,302 @@
+# Release Ticket Agent catalog
+#
+# Single source of truth for which tickets a release gets, who owns them and
+# what their checklists contain. Modelled on the CM release templates:
+#   CM-1251 (CBL major), CM-1264 (SGW major), CM-1387 (CBL maintenance),
+#   CM-1348 (SGW maintenance), CM-1374 (Edge Server maintenance).
+# Changing the process = changing this file (reviewed in a PR), not editing
+# tickets by hand.
+
+jira:
+  project: CM
+  epic_issue_type: Epic
+  task_issue_type: Task
+  agent_label: release-agent
+
+# Function -> Jira accountId. Products can override any function below.
+# null means "leave unassigned" and the plan flags it.
+people:
+  release_manager: "712020:3e7a9a59-7b72-450f-ab04-1ee42766d17b"   # Sathya Thothathri
+  qe: "557058:63aa94c0-ee15-4840-834d-84d0cb07e20d"                # Pasin Suriyentrakorn
+  perf: "62546d49c23e5b006ab2d10d"                                 # Dragos Taraban
+  docs: "712020:8013ad17-0f53-411b-85cb-e1ceac29a04b"              # Fortune Ikechi
+  build: "557058:7a9740cb-5bb4-4901-a696-d0815b184de2"             # Ming Ho
+  web: "712020:3e7a9a59-7b72-450f-ab04-1ee42766d17b"               # Sathya Thothathri
+  pm: null
+  gtm: null
+  support: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4"           # Adam Fraser
+  legal: null
+  security: null
+  compliance: null
+
+platforms:
+  android: Android
+  ios: iOS
+  java: Java
+  c: C
+  dotnet: .NET
+  js: JavaScript
+  react_native: React Native
+
+products:
+  cbl:
+    title: CBL
+    name: Couchbase Lite
+    aliases: [couchbase lite, cbl, lite]
+    match: '^CBL(?!.*\b(JS|React Native|Vector Search)\b)'
+    platforms: [android, ios, java, c, dotnet]
+    process_owners: Sathya Thothathri
+    tasks:
+      maintenance: [qe_signoff, documentation, publish_builds, web_updates]
+      major: &major_tasks
+        [gtm_review, qe_signoff, perf_signoff, support_training, white_glove,
+         notify_platforms, licences, documentation, publish_builds, web_updates,
+         cloud_marketplace, compliance_review, legal_signoff, security_signoff,
+         compliance_signoff, threat_modelling]
+    not_applicable: [cloud_marketplace]
+
+  cbl-vs:
+    title: CBL Vector Search
+    name: Couchbase Lite Vector Search
+    aliases: [vector search, cbl vector search, cbl vs]
+    match: '^CBL.*Vector Search'
+    platforms: [android, ios, java, c, dotnet]
+    process_owners: Sathya Thothathri
+    tasks:
+      maintenance: [qe_signoff, documentation, publish_builds, web_updates]
+      major: *major_tasks
+    not_applicable: [cloud_marketplace]
+
+  cbl-js:
+    title: CBL JS
+    name: Couchbase Lite for JavaScript
+    aliases: [cbl js, cbl-js, lite js, couchbase lite javascript]
+    match: '^CBL\s*JS'
+    platforms: [js]
+    process_owners: Sathya Thothathri
+    tasks:
+      maintenance: [qe_signoff, documentation, publish_builds, web_updates]
+      major: *major_tasks
+    not_applicable: [cloud_marketplace]
+
+  cbl-rn:
+    title: CBL React Native
+    name: Couchbase Lite for React Native
+    aliases: [react native, cbl-rn, cbl react native, rn]
+    match: '^CBL[- ]React Native|^CBL Release Ticket React Native'
+    platforms: [react_native]
+    process_owners: Sathya Thothathri
+    tasks:
+      maintenance: [qe_signoff, documentation, publish_builds, web_updates, pm_signoff]
+      major: *major_tasks
+    not_applicable: [cloud_marketplace]
+
+  sgw:
+    title: SGW
+    name: Sync Gateway
+    aliases: [sync gateway, sgw, sg]
+    match: '^SGW'
+    platforms: []
+    process_owners: Anubhuti Sharma / Iveta Dulova
+    owners:
+      qe: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4"            # Adam Fraser
+    tasks:
+      maintenance: [qe_signoff, perf_signoff, documentation, publish_builds, web_updates]
+      major: *major_tasks
+
+  edge-server:
+    title: Edge Server
+    name: Couchbase Edge Server
+    aliases: [edge server, edge]
+    match: '^Edge Server'
+    platforms: []
+    process_owners: Sathya Thothathri
+    owners:
+      qe: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4"            # Adam Fraser
+    tasks:
+      maintenance: [qe_signoff, perf_signoff, documentation, publish_builds, web_updates]
+      major: *major_tasks
+
+# Task library. `owner` is a function from `people`. `due_offset_days` is
+# relative to the GA date (negative = before GA). `sections` may be keyed by
+# product; `default` is used otherwise. A row tagged with `platforms` is
+# pre-marked NA when none of those platforms ship in the release.
+tasks:
+  qe_signoff:
+    summary: QE Sign-off
+    owner: qe
+    due_offset_days: -5
+    sections:
+      maintenance:
+        - type: platform_matrix
+          heading: Testing matrix
+          columns: [Platform, Sync Gateway / Data Set Version]
+      default:
+        - notes:
+            - QE updates the list for validations done for the release.
+            - If a task is not applicable, please mention "NA" in Status column.
+            - QE resolves the ticket post validations, which signals QE Sign-off is given.
+          columns: [Task, Status]
+          rows:
+            - {text: "Android/Kotlin - Functional + P2P + API", platforms: [android]}
+            - {text: iOS - Functional + API, platforms: [ios]}
+            - {text: .NET Core - Functional + API, platforms: [dotnet]}
+            - {text: "Java bindings - Desktop, WebServer", platforms: [java]}
+            - {text: C platforms - Functional + API, platforms: [c]}
+            - {text: JavaScript - Functional + API, platforms: [js]}
+            - {text: React Native - Functional + API, platforms: [react_native]}
+            - Upgrade - All Platforms
+            - Manual Device Tests
+            - CE Vs EE
+            - System Testing
+            - Product Documentation
+            - Release Notes
+            - OS/Platform Certification
+            - Verification of DL packages on repos (other than web)
+
+  perf_signoff:
+    summary: Perf Sign-off
+    owner: perf
+    due_offset_days: -5
+
+  documentation:
+    summary: Documentation Tasks
+    owner: docs
+    due_offset_days: -1
+    sections:
+      default:
+        - notes:
+            - If a task is not applicable, please mention "NA" in Status column.
+            - Please resolve the ticket when required tasks are done.
+          columns: [Task, Status]
+          rows:
+            - Documentation deprecation and behaviour change
+            - Documentation Feature
+            - Documentation Release Notes
+            - Documentation What's new
+            - Verification of DL links in docs
+            - Documentation of code examples
+
+  publish_builds:
+    summary: Publish Builds
+    owner: build
+    due_offset_days: 0
+    sections:
+      sgw: &server_publish
+        - notes:
+            - If a task is not applicable, please mention "NA" in Status column.
+            - Build team to share build URLs.
+            - Build team resolves the ticket when all relevant tasks are completed.
+          columns: [Task, Status]
+          rows:
+            - Anti-virus scan
+            - Qualys WAS Scan
+            - Manifest for release GitHub
+            - Update release log wiki
+            - Publish notices.txt
+        - heading: Publish Builds to
+          columns: [Repo Name, Status]
+          rows:
+            - Release binaries to S3
+            - DockerHub
+            - RHCC
+      edge-server: *server_publish
+      default:
+        - notes:
+            - If a task is not applicable, please mention "NA" in Status column.
+            - Build team to share build URLs.
+            - Build team resolves the ticket when all relevant tasks are completed.
+          columns: [Task, Status]
+          rows:
+            - Manifest for release GitHub
+            - Update release log wiki
+        - heading: Publish Builds to
+          columns: [Repo Name, Status]
+          rows:
+            - {text: "Carthage, Cocoapods for iOS", platforms: [ios]}
+            - {text: NuGet for .NET, platforms: [dotnet]}
+            - {text: apt for C, platforms: [c]}
+            - {text: "Maven Central for Android, Java CE", platforms: [android, java]}
+            - {text: "mobile.maven.couchbase.com for Android, Java EE", platforms: [android, java]}
+            - {text: Swift Package Manager (SPM), platforms: [ios], status: "(x) [Done by Dev]"}
+            # TODO: confirm the npm publish channel names with the build team.
+            - {text: npm, platforms: [js, react_native]}
+            - S3
+
+  web_updates:
+    summary: Web Updates
+    owner: web
+    due_offset_days: 0
+    sections:
+      default:
+        - columns: [Tasks, Status, FEWD / TOOL ticket link]
+          rows:
+            - Download Page updates
+            - 3rd Party Components Updates
+
+  pm_signoff:
+    summary: PM sign off
+    owner: pm
+    due_offset_days: -2
+
+  gtm_review:
+    summary: GTM Plan Review
+    owner: gtm
+    due_offset_days: -30
+    sections:
+      default:
+        - columns: [Task, Status]
+          rows:
+            - Tier of launch reviewed and appropriate planning and deliverables in place with GTM and Marketing teams
+          notes_after:
+            - May be no deliverables in case of a small feature or enhancement.
+
+  support_training:
+    summary: Support Training and Publish KB Articles
+    owner: support
+    due_offset_days: 14
+
+  white_glove:
+    summary: White Glove Testing by PM
+    owner: pm
+    due_offset_days: -7
+
+  notify_platforms:
+    summary: Notify Changes to Platforms
+    owner: pm
+    due_offset_days: -7
+
+  licences:
+    summary: Licences, Privacy Policy, Export Control Updates
+    owner: pm
+    due_offset_days: -7
+
+  cloud_marketplace:
+    summary: Cloud Marketplace updates
+    owner: release_manager
+    due_offset_days: 0
+
+  compliance_review:
+    summary: Compliance, legal and security review
+    owner: release_manager
+    due_offset_days: -14
+
+  legal_signoff:
+    summary: Legal Sign-off
+    owner: legal
+    due_offset_days: -7
+
+  security_signoff:
+    summary: Security Sign-off
+    owner: security
+    due_offset_days: -7
+
+  compliance_signoff:
+    summary: Compliance Sign-off
+    owner: compliance
+    due_offset_days: -7
+
+  threat_modelling:
+    summary: Threat Modelling
+    owner: security
+    due_offset_days: 30

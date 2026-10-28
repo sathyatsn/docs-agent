@@ -1,0 +1,21 @@
+# Example release train: every release that ships together, in one file.
+#   python release_agent.py train releases/example-train.yaml          # dry run
+#   python release_agent.py train releases/example-train.yaml --apply  # create
+# Top-level keys are defaults for every entry below.
+ga_date: 2026-12-10
+
+releases:
+  - {product: sgw, version: 4.1.4}
+  - {product: sgw, version: 4.0.10}
+  - {product: edge-server, version: 1.0.3}
+  - product: cbl
+    version: 4.1.4
+    ga_date: 2026-12-12
+    qe_matrix:
+      android: "SGW: 4.1, DS: 4.0"
+      ios: "SGW: 4.1, DS: 4.0, 3.2"
+      java: "SGW: 4.1, DS: 4.0"
+      c: "SGW: 4.1, DS: 4.0"
+      dotnet: "SGW: 4.1, DS: 4.0"
+  # Platform-scoped release: only .NET ships, other platform rows become NA.
+  - {product: cbl, version: 3.4.4, platforms: [dotnet]}
