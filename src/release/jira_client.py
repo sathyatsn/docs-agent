@@ -17,6 +17,7 @@ class JiraClient:
         self.session.auth = (email or os.environ["JIRA_EMAIL"],
                              api_token or os.environ["JIRA_API_TOKEN"])
         self.session.headers["Accept"] = "application/json"
+        self._names: dict[str, str] = {}
 
     def search(self, jql: str, fields: list[str]) -> list[dict]:
         issues, token = [], None
@@ -54,6 +55,19 @@ class JiraClient:
             logger.error("Jira create failed (%s): %s", resp.status_code, resp.text)
             resp.raise_for_status()
         return resp.json()["key"]
+
+    def add_comment(self, key: str, body: str) -> None:
+        resp = self.session.post(f"{self.base_url}/rest/api/2/issue/{key}/comment", json={"body": body})
+        if not resp.ok:
+            logger.error("Jira comment on %s failed (%s): %s", key, resp.status_code, resp.text)
+            resp.raise_for_status()
+
+    def display_name(self, account_id: str) -> str:
+        """Jira display name for an accountId; falls back to the raw id if lookup fails."""
+        if account_id not in self._names:
+            resp = self.session.get(f"{self.base_url}/rest/api/3/user", params={"accountId": account_id})
+            self._names[account_id] = resp.json().get("displayName", account_id) if resp.ok else account_id
+        return self._names[account_id]
 
     def browse_url(self, key: str) -> str:
         return f"{self.base_url}/browse/{key}"

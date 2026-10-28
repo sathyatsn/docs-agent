@@ -1,4 +1,5 @@
 import argparse
+import getpass
 import logging
 import sys
 from datetime import date
@@ -57,32 +58,47 @@ def print_plan(plan: ReleasePlan, show_descriptions: bool) -> None:
         print("  ✗ BLOCKED: nothing will be created for this release")
 
 
-def run(requests_: list[ReleaseRequest], apply: bool, offline: bool, show_descriptions: bool) -> int:
-    from src.release.planner import apply_plan, plan_release
+def _service(offline: bool):
+    from src.release.plan_store import PlanStore
+    from src.release.service import ReleaseService
+    return ReleaseService(Catalog.load(), _jira(offline), PlanStore())
 
-    catalog = Catalog.load()
-    jira = _jira(offline)
-    plans = [plan_release(catalog, r, jira) for r in requests_]
-    for plan in plans:
+
+def run(releases: list, apply: bool, offline: bool, show_descriptions: bool, source: str,
+        source_text: str = "") -> int:
+    """Plan releases, store the plan for approval, and optionally apply it immediately."""
+    service = _service(offline)
+    prepared = service.prepare(releases, requested_by=getpass.getuser(), source=source,
+                               source_text=source_text)
+    for plan in prepared.plans:
         print_plan(plan, show_descriptions)
+    for entry in prepared.stored.releases:
+        for note in entry.get("notes", []):
+            print(f"  ? {note}")
 
-    total = sum(len(p.to_create) for p in plans if not p.blocked)
+    total = sum(len(p.to_create) for p in prepared.plans if not p.blocked)
     if not apply:
-        print(f"\nDry run: {total} issue(s) would be created. Re-run with --apply to create them.")
+        print(f"\nPlan {prepared.stored.id}: {total} issue(s) would be created. Nothing written yet.")
+        if not offline and total:
+            print(f"Create exactly this plan with: python release_agent.py approve {prepared.stored.id}")
         return 0
     if offline:
         print("--apply needs Jira access; drop --offline.")
         return 2
+    return report(service.approve(prepared.stored.id, getpass.getuser()))
 
-    failed = False
-    for plan in plans:
-        if plan.blocked:
-            failed = True
-            continue
-        created = apply_plan(plan, catalog, jira)
-        print(f"{plan.request.product} {plan.request.version}: created {len(created)} -> "
-              f"{jira.browse_url(plan.epic.existing_key)}")
-    return 1 if failed else 0
+
+def report(result) -> int:
+    print(result.message)
+    for key in result.epic_keys:
+        print(f"  epic: {key}")
+    if result.created_keys:
+        print(f"  created: {', '.join(result.created_keys)}")
+    if result.replacement:
+        for plan in result.replacement.plans:
+            print_plan(plan, False)
+        print(f"Review, then: python release_agent.py approve {result.replacement.stored.id}")
+    return 0 if result.status in ("applied", "cancelled") else 1
 
 
 def main():
@@ -107,9 +123,14 @@ def main():
     train.add_argument("file")
     add_common(train)
 
-    intake = sub.add_parser("intake", help="Parse a free-text request with Claude, then plan/create")
+    intake = sub.add_parser("intake", help="Parse a free-text request with Claude into a plan for approval")
     intake.add_argument("text", help="Free text, or '-' to read stdin")
-    add_common(intake)
+    intake.add_argument("--show-descriptions", action="store_true", help="Print rendered descriptions")
+
+    approve = sub.add_parser("approve", help="Create the tickets of a reviewed plan, exactly as shown")
+    approve.add_argument("plan_id")
+    cancel = sub.add_parser("cancel", help="Cancel a pending plan")
+    cancel.add_argument("plan_id")
 
     sub.add_parser("audit", help="Report duplicates, missing tasks and gaps on open release epics")
     sub.add_parser("products", help="List catalog products and platforms")
@@ -127,26 +148,35 @@ def main():
         print(format_audit(audit_open_releases(catalog, _jira(False))))
         return
 
+    if args.command in ("approve", "cancel"):
+        service = _service(False)
+        user = getpass.getuser()
+        result = service.approve(args.plan_id, user) if args.command == "approve" else service.cancel(args.plan_id, user)
+        sys.exit(report(result))
+
+    if args.command == "intake":
+        from src.release.intake import parse_release_text
+        text = sys.stdin.read() if args.text == "-" else args.text
+        result = parse_release_text(text, catalog)
+        if result.rejected or not result.releases:
+            print("Could not verify the whole request; nothing was planned:")
+            for line in result.rejected or ["No release found."]:
+                print(f"  ! {line}")
+            sys.exit(1)
+        sys.exit(run(result.releases, False, False, args.show_descriptions, "cli-intake", text))
+
     if args.command == "create":
         item = {"product": args.product, "version": args.version, "ga_date": args.ga,
                 "release_type": args.release_type, "epic": args.epic,
                 "platforms": args.platforms.split(",") if args.platforms else None}
         requests_ = [_request_from_dict(catalog, item)]
-    elif args.command == "train":
+    else:
         with open(args.file) as f:
             data = yaml.safe_load(f)
         defaults = {k: v for k, v in data.items() if k != "releases"}
         requests_ = [_request_from_dict(catalog, item, defaults) for item in data["releases"]]
-    else:
-        from src.release.intake import parse_release_text
-        text = sys.stdin.read() if args.text == "-" else args.text
-        requests_, unparsed = parse_release_text(text, catalog)
-        for line in unparsed:
-            print(f"! Could not parse: {line}")
-        if not requests_:
-            sys.exit(1)
 
-    sys.exit(run(requests_, args.apply, args.offline, args.show_descriptions))
+    sys.exit(run(requests_, args.apply, args.offline, args.show_descriptions, "cli"))
 
 
 if __name__ == "__main__":

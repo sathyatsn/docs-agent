@@ -1,7 +1,8 @@
 # Release Ticket Agent: design
 
-Automates creating the Jira release tickets (one epic plus its child tasks in
-`CM`) for every Couchbase Mobile product and platform: Couchbase Lite (Android,
+Automates creating the Jira release tickets (one epic plus its child tasks,
+in `CM` by default, or in another project configured per product) for every
+Couchbase Mobile product and platform: Couchbase Lite (Android,
 iOS, Java, C, .NET), CBL Vector Search, CBL JS, CBL React Native, Sync Gateway
 and Edge Server.
 
@@ -44,22 +45,31 @@ Goals
    pre-marked NA.
 5. An audit that finds gaps in open release epics.
 
+6. A TPM can ask in Slack in one line and an approver creates the tickets with one click.
+
 Non-goals (v1): transitioning or closing tickets, creating the FEWD tickets in
 the separate `jira.issues.couchbase.com` instance, release notes.
 
 ## 3. Architecture
 
 ```
-CLI flags | releases/<train>.yaml | free text ──(Claude intake)──┐
-                                                                 ▼
-                                                     ReleaseRequest(s)
-                                                                 ▼
-  config/release_catalog.yaml ──▶ Planner: pick tasks, render checklists,
-                                  then reconcile with existing Jira epics/children
-                                                                 ▼
-                                             Dry-run plan (always printed)
-                                                                 ▼ --apply
-                                  Jira REST: epic first, then missing child tasks
+Slack /release or @mention ─┐        CLI flags | releases/<train>.yaml ─┐
+                            ▼                                          │
+     Claude intake: split text into candidates + verbatim quotes       │
+                            ▼                                          │
+     grounding.py: verify every field against the text                 │
+      (anything unverifiable -> reply with reasons; nothing planned)   │
+                            ▼                                          ▼
+                     ReleaseRequest(s)  ◀───────────────────────────────┘
+                            ▼
+  release_catalog.yaml ──▶ Planner: tasks, checklists, owners, dates;
+                           reconcile with existing epics/children in Jira
+                            ▼
+              Stored plan + fingerprint  ──▶  shown to reviewer (Slack / CLI)
+                            ▼  Approve (allow-listed approver)
+              Rebuild (no LLM) ─ fingerprint same? ─ no ─▶ re-post updated plan
+                            ▼ yes
+              Jira REST: epic, then missing tasks; provenance comment
 ```
 
 | Module | Responsibility |
@@ -70,20 +80,23 @@ CLI flags | releases/<train>.yaml | free text ──(Claude intake)──┐
 | `src/release/render.py` | Renders checklists as Jira wiki markup; NA-marks rows whose platforms are not in the release; builds the QE testing matrix for in-scope platforms only. |
 | `src/release/planner.py` | Builds the plan, finds existing epics (by agent label, then by legacy title match), marks children that already exist, creates what is missing (epic first, then tasks). |
 | `src/release/auditor.py` | Lists open release epics with duplicates, missing tasks, missing GA dates and unassigned tasks. |
-| `src/release/intake.py` | Optional: Claude turns "cut SGW 4.1.4 and 4.0.10 for Dec 10, plus a .NET-only 3.4.4" into `ReleaseRequest`s. |
+| `src/release/intake.py` | Claude splits free text ("SGW 4.1.4 and 4.0.10 GA Dec 10") into candidate releases, each with verbatim evidence quotes. |
+| `src/release/grounding.py` | Deterministic checks that each candidate's product, version, platforms and date are written in the request; anything else is rejected. |
+| `src/release/plan_store.py`, `service.py` | Stores plans with a fingerprint; prepare -> approve -> apply exactly once; provenance comment. |
+| `src/release/slack_app.py`, `slack_format.py`, `slack_bot.py` | Slack bot: `/release` and @mention intake, Block Kit plan, Approve/Cancel buttons, approver allow-list. |
 | `src/release/jira_client.py` | JQL search (`/rest/api/3/search/jql`) and issue creation (`/rest/api/2/issue`, so descriptions can be wiki markup). |
-| `release_agent.py` | CLI: `create`, `train`, `intake`, `audit`, `products`. |
+| `release_agent.py` | CLI: `create`, `train`, `intake`, `approve`, `cancel`, `audit`, `products`. |
 
 ### Key decisions
 
 **Deterministic tickets, LLM only for intake.** The epic description says
 "Please do not modify without consultation". Ticket content therefore comes
-from the catalog, never from a model. Claude only turns free text into
-structured requests, which are validated against the catalog (enum products,
-version regex) and shown as a dry-run plan before anything is written.
+from the catalog, never from a model. Claude only splits free text into
+candidate releases, and section 4 lists the checks every candidate must pass.
 
 **Dry run by default.** Every command prints the plan, including which issues
-already exist, and writes nothing without `--apply`.
+already exist, and writes nothing until it's approved (`approve <id>`, the Slack
+button, or `--apply` for exact `create`/`train` arguments).
 
 **Idempotency through labels plus legacy matching.** Agent-created issues get
 `release-agent`, `release-<product>-<version>[-<platforms>]` and
@@ -109,43 +122,141 @@ Java pre-marked `NA (platform not in this release)`.
 Each task's `duedate` is GA plus `due_offset_days` (QE −5, Docs −1, Publish/Web
 0, Support +14, …), so Jira filters and dashboards can track slippage.
 
-## 4. Usage
+## 4. Quality guarantees
+
+These hold for every path (CLI, YAML train, Slack):
+
+1. **Ticket content is never generated by a model.** Titles, checklists,
+   owners and due dates come only from `config/release_catalog.yaml`.
+2. **Every extracted field is checked against the requester's words.** Claude
+   must return a verbatim quote for each release (and for its GA date).
+   `src/release/grounding.py` then checks, without any model involved:
+   * the quote appears in the request;
+   * the version is written in it;
+   * the product named closest before that version is the claimed product
+     (so "CBL JS 1.0.4" can't become CBL);
+   * the platforms named around the version are exactly the claimed platforms
+     (a ".NET-only" release can't silently become a full release, or the
+     reverse);
+   * the date's day, month and year match what's written. Ambiguous `12/10`
+     dates and past dates are rejected. Relative dates ("next Friday") are
+     marked for the approver to check.
+   * every version number in the request ends up in exactly one release.
+3. **All or nothing on intake.** If any part of a request can't be verified,
+   nothing is planned. The requester gets the reasons and an example of the
+   expected format.
+4. **Nothing is written without approval.** Each plan is stored with a SHA-256
+   fingerprint of everything shown: issues, text, owners, dates, and what
+   already exists. On approval the plan is rebuilt from the stored structured
+   requests (Claude is not called again). Tickets are created only if the
+   fingerprint is unchanged. If Jira or the catalog changed in between, a
+   fresh plan is posted for re-approval.
+5. **Exactly once.** A plan moves `pending -> applying` atomically, so double
+   clicks and two approvers can't apply it twice. Re-requesting a release
+   only fills in missing tickets, and duplicate epics block the plan.
+6. **Honest failure reporting.** If Jira fails partway through, the reply lists
+   the issues that were created. Requesting the same release again completes
+   the rest.
+7. **Audit trail.** Each new epic gets a Jira comment with the plan ID, the
+   requester, the approver and the original request text.
+8. **Fail closed.** If no Slack approvers are configured, nobody can approve.
+   Unknown products, platforms or Jira project keys are rejected when the
+   catalog loads.
+
+## 5. Using it
+
+### Slack (for TPMs)
+
+```
+/release SGW 4.1.4 GA Dec 10
+/release SGW 4.1.4 GA Dec 10
+         Edge Server 1.0.3 GA Dec 10
+         CBL .NET 3.4.4 GA Dec 12
+@release-tickets SGW 4.0.10 GA 2026-12-10        (in a thread or channel)
+/release help
+```
+
+The bot replies with the full plan:
+* each epic and task, with "exists CM-123" or "create";
+* the owner (display name read from Jira) and due date;
+* the quoted text each release and GA date was read from;
+* any warnings.
+
+Buttons: **Approve: create N issue(s)** (approvers only, with a confirmation
+dialog) and **Cancel** (the requester or an approver). The buttons disappear
+as soon as approval starts. The message is then updated with links to the
+created epics.
+
+### CLI
 
 ```bash
-python release_agent.py products
-python release_agent.py create --product sgw --version 4.1.4 --ga 2026-12-10            # dry run
+python release_agent.py create --product sgw --version 4.1.4 --ga 2026-12-10   # plan, prints plan id
+python release_agent.py approve rp-1a2b3c4d                                    # create exactly that plan
 python release_agent.py create --product "Couchbase Lite" --version 3.4.4 --platforms dotnet --ga 2026-12-12 --apply
 python release_agent.py train releases/example-train.yaml --show-descriptions
-python release_agent.py intake "SGW 4.1.4 and 4.0.10 GA Dec 10; CBL .NET 3.4.4 a week later"
+python release_agent.py intake "SGW 4.1.4 and 4.0.10 GA Dec 10"                # plan only; approve separately
+python release_agent.py cancel rp-1a2b3c4d
 python release_agent.py audit
 ```
 
-`--offline` plans without contacting Jira (useful in CI to check catalog changes).
+`--offline` plans without contacting Jira, which is useful in CI to check
+catalog changes.
 
-Configuration (`.env`): `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`
-(a token from a user or service account with create rights in `CM`), and
-optionally `RELEASE_AGENT_MODEL` (default `claude-opus-5-5`) for intake.
+### Setup
 
-## 5. Rollout
+1. **Jira:** create a service account with create rights in each release project
+   (`CM` and any project set per product). Put `JIRA_BASE_URL`, `JIRA_EMAIL`
+   and `JIRA_API_TOKEN` in `.env`.
+2. **Claude:** set `ANTHROPIC_API_KEY`. `RELEASE_AGENT_MODEL` defaults to
+   `claude-opus-5-5`. The intake call enables Anthropic's server-side refusal
+   fallback (`fallbacks: "default"`).
+3. **Slack app:** at api.slack.com/apps, choose *Create New App* -> *From
+   manifest* and paste `slack/manifest.yaml`. Install it to the workspace, then
+   copy the Bot token (`xoxb-…`) to `SLACK_BOT_TOKEN`. Under *Basic Information*,
+   create an app-level token with `connections:write` and put it in
+   `SLACK_APP_TOKEN`. Socket Mode is used, so no public URL is needed.
+4. **Approvers:** add the TPMs' / release managers' Slack member IDs to
+   `slack.approvers` in the catalog. Optionally restrict `slack.allowed_channels`.
+5. **Run:** `python slack_bot.py` on any always-on host (VM or container). Pending
+   plans are kept in `config/release_plans.json` (`RELEASE_PLAN_STORE`). Keep
+   that file on persistent storage.
+6. Invite the bot to the release channel (`/invite @release-tickets`).
 
-1. **Shadow (week 1):** run `audit` and dry runs for the next release train;
-   compare with hand-made tickets. Fill in the `null` owners in the catalog
-   (PM, GTM, legal, security, compliance) and confirm the JS/RN npm publish rows.
-2. **Pilot:** use `--apply` for one maintenance train (SGW + Edge Server), then CBL.
-3. **Default:** creating a release becomes "open a PR adding `releases/<train>.yaml`".
-   A CI job runs `train --offline` on the PR and `train --apply` on merge, so
-   every release has a reviewed record in git.
-4. Retire the clone-by-hand step; keep CM-1251/1264/1348/1374/1387 as read-only
-   references or close them.
+### Adding a product or another Jira space
 
-## 6. Phase 2 options
+Add an entry under `products:` with:
+* its title and aliases;
+* a title-match regex;
+* its platforms;
+* its tasks for `maintenance` and `major`.
+
+To file it outside `CM`, add `jira: {project: KEY}` (optionally with
+`epic_issue_type` / `task_issue_type`). Run `pytest` and a `--offline` dry
+run before merging. The bot only accepts products that are in the catalog.
+
+## 6. Rollout
+
+1. **Shadow (week 1):**
+   * Run `audit` and dry runs for the next release train, and compare them
+     with the hand-made tickets.
+   * Fill in the `null` owners (PM, GTM, legal, security, compliance) and the
+     Slack approvers.
+   * Confirm the JS/RN npm publish rows.
+2. **Pilot:** TPMs request one maintenance train in Slack (SGW + Edge Server);
+   a release manager approves.
+3. **Default:** Slack becomes the way to request releases. For large trains,
+   use a reviewed `releases/<train>.yaml` (CI runs `train --offline` on the
+   PR).
+4. Retire the clone-by-hand step. Keep CM-1251/1264/1348/1374/1387 as
+   read-only references.
+
+## 7. Phase 2 options
 
 * Create the linked FEWD Download-page and 3rd-party tickets in
   `jira.issues.couchbase.com` and write their links into the Web Updates table.
 * Set `fixVersion` and create the Jira version if it's missing.
-* Post the plan and created links to the release Slack channel. Use the
-  existing meeting-notes agent to spot "cut x.y.z" decisions and turn them into
-  `intake` dry runs for approval.
+* Use the existing meeting-notes agent to spot "cut x.y.z" decisions and post
+  them to the bot as plans for approval.
 * Status roll-up: read each child checklist's `(x)` / `(/)` cells and report
   readiness per release (feeds the mobile release gate checklist).
 * Bulk fixes from `audit`: backfill `duedate` from titles and add missing

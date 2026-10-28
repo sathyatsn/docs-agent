@@ -7,11 +7,26 @@
 # Changing the process = changing this file (reviewed in a PR), not editing
 # tickets by hand.
 
+# Defaults for every product. A product can override project / issue types
+# with its own `jira:` block, e.g. to file a team's releases in another space:
+#   products:
+#     my-product:
+#       jira: {project: DOC, epic_issue_type: Epic, task_issue_type: Task}
 jira:
   project: CM
   epic_issue_type: Epic
   task_issue_type: Task
   agent_label: release-agent
+
+# Slack bot (slack_bot.py). Only these Slack user IDs may approve a plan and
+# create tickets; an empty list means nobody can (fail closed). Find an ID in
+# Slack via profile -> "..." -> "Copy member ID".
+slack:
+  approvers: []
+  # Optional: restrict the bot to these channel IDs. Empty = any channel it is in.
+  allowed_channels: []
+  # Pending plans expire after this many hours and must be requested again.
+  plan_ttl_hours: 24
 
 # Function -> Jira accountId. Products can override any function below.
 # null means "leave unassigned" and the plan flags it.

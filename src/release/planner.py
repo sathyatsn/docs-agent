@@ -1,3 +1,5 @@
+import hashlib
+import json
 import logging
 import re
 from datetime import timedelta
@@ -41,7 +43,7 @@ def _display_title(catalog: Catalog, request: ReleaseRequest, platforms: list[st
 
 def find_existing_epics(jira: JiraClient, catalog: Catalog, request: ReleaseRequest) -> list[dict]:
     """Find release epics for this product+version, whether the agent or a human created them."""
-    project = catalog.jira["project"]
+    project = catalog.jira_for(request.product)["project"]
     scope = release_scope(catalog, request)
     by_label = jira.search(
         f'project = {project} AND issuetype = Epic AND labels = "{release_label(request, scope)}"',
@@ -74,8 +76,10 @@ def plan_release(catalog: Catalog, request: ReleaseRequest, jira: JiraClient | N
     if unknown:
         raise ValueError(f"{product['title']} does not ship on: {', '.join(sorted(unknown))}")
 
+    jira_cfg = catalog.jira_for(request.product)
+    project = jira_cfg["project"]
     title = _display_title(catalog, request, platforms)
-    labels = [catalog.jira["agent_label"], release_label(request, release_scope(catalog, request)),
+    labels = [jira_cfg["agent_label"], release_label(request, release_scope(catalog, request)),
               f"release-type-{request.release_type}"]
     kind = "Maintenance Release Ticket" if request.release_type == "maintenance" else "Release Ticket"
     epic_summary = f"{title} {kind} - {request.version}"
@@ -84,6 +88,7 @@ def plan_release(catalog: Catalog, request: ReleaseRequest, jira: JiraClient | N
 
     epic = PlannedIssue(
         task_id=None,
+        project=project,
         summary=epic_summary,
         description=render_epic(catalog, request, platforms),
         labels=labels,
@@ -104,6 +109,7 @@ def plan_release(catalog: Catalog, request: ReleaseRequest, jira: JiraClient | N
         due = request.ga_date + timedelta(days=task.get("due_offset_days", 0)) if request.ga_date else None
         plan.tasks.append(PlannedIssue(
             task_id=task_id,
+            project=project,
             summary=summary,
             description=render_task(catalog, task_id, request, platforms),
             labels=labels,
@@ -147,17 +153,23 @@ def _reconcile(plan: ReleasePlan, catalog: Catalog, jira: JiraClient) -> None:
                 break
 
 
-def apply_plan(plan: ReleasePlan, catalog: Catalog, jira: JiraClient) -> list[str]:
-    """Create every planned issue that does not exist yet. Returns the new keys."""
+def apply_plan(plan: ReleasePlan, catalog: Catalog, jira: JiraClient,
+               created: list[str] | None = None) -> list[str]:
+    """Create every planned issue that does not exist yet. Returns the new keys.
+
+    Keys are appended to `created` as each issue is made, so a caller still knows
+    what exists if Jira fails part-way through.
+    """
     if plan.blocked:
         raise RuntimeError("Plan is blocked: " + "; ".join(plan.warnings))
-    project = catalog.jira["project"]
-    created = []
+    jira_cfg = catalog.jira_for(plan.request.product)
+    created = [] if created is None else created
+    start = len(created)
 
     epic = plan.epic
     if epic.is_new:
         epic.existing_key = jira.create_issue(
-            project, catalog.jira["epic_issue_type"], epic.summary, epic.description,
+            epic.project, jira_cfg["epic_issue_type"], epic.summary, epic.description,
             epic.labels, epic.assignee_id, epic.due_date,
         )
         created.append(epic.existing_key)
@@ -167,9 +179,27 @@ def apply_plan(plan: ReleasePlan, catalog: Catalog, jira: JiraClient) -> list[st
         if not task.is_new:
             continue
         task.existing_key = jira.create_issue(
-            project, catalog.jira["task_issue_type"], task.summary, task.description,
+            task.project, jira_cfg["task_issue_type"], task.summary, task.description,
             task.labels, task.assignee_id, task.due_date, parent_key=epic.existing_key,
         )
         created.append(task.existing_key)
         logger.info("Created task %s: %s", task.existing_key, task.summary)
-    return created
+    return created[start:]
+
+
+def plan_fingerprint(plans: list[ReleasePlan]) -> str:
+    """Hash of everything a reviewer approves: which issues, their content, owners, dates and
+    what already exists in Jira. If any of it changes before approval, the hash changes."""
+    def issue(i: PlannedIssue) -> dict:
+        return {
+            "project": i.project, "task_id": i.task_id, "summary": i.summary,
+            "description": i.description, "labels": i.labels, "assignee": i.assignee_id,
+            "due": i.due_date.isoformat() if i.due_date else None, "existing": i.existing_key,
+        }
+
+    payload = [
+        {"request": p.request.to_dict(), "blocked": p.blocked,
+         "issues": [issue(i) for i in [p.epic, *p.tasks]]}
+        for p in plans
+    ]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()

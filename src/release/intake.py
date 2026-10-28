@@ -1,68 +1,90 @@
-"""Turn free text (a Slack ask, release-planning notes) into ReleaseRequests with Claude.
+"""Turn free text (a Slack ask, release-planning notes) into verified ReleaseRequests.
 
-Claude only parses intent. Ticket content always comes from the catalog, and
-nothing is written to Jira until a human reviews the plan and passes --apply.
+Claude only proposes how to split the text into releases. Every field it returns
+must be backed by a verbatim quote and is re-checked by src/release/grounding.py;
+anything unverifiable is rejected and sent back to the requester. Ticket content
+always comes from the catalog, never from the model.
 """
 
 import json
 import os
+from dataclasses import dataclass, field
 from datetime import date
 
 import anthropic
 
 from src.release.catalog import Catalog
-from src.release.models import ReleaseRequest
+from src.release.grounding import VERSION_TOKEN, GroundedRelease, ground_all
 
 SYSTEM_PROMPT = """\
-You extract software release requests for the Couchbase Mobile release team.
-Each request names one product, one version and optionally a GA date and a
-subset of platforms (for example "CBL .NET 4.1.4" means product cbl with
-platforms [dotnet]). One sentence can contain several releases; return one
-entry per product+version. Resolve relative or partial dates against today's
-date and return them as YYYY-MM-DD. Leave a field null rather than guessing.
-Anything you cannot map to a known product goes in `unparsed`.\
+You extract software release requests for the Couchbase release team. The output
+is checked word-for-word against the request, so copy, never paraphrase.
+
+For each release the request asks for, return one entry with:
+- product: the catalog key of the product named for that version.
+- version: the version exactly as written.
+- platforms: only if the request limits that release to specific platforms
+  (e.g. "CBL .NET 4.1.4" -> ["dotnet"]); otherwise null.
+- ga_date: YYYY-MM-DD only if a GA/release date is stated for it; resolve
+  partial or relative dates against today's date. Otherwise null.
+- evidence: the shortest verbatim span of the request that contains the
+  product name and the version.
+- ga_date_evidence: the verbatim span that states the date, or null.
+
+Do not invent releases, versions, dates or platforms. If something is unclear,
+leave it out and describe it in `unclear`.\
 """
 
 
+@dataclass
+class IntakeResult:
+    releases: list[GroundedRelease] = field(default_factory=list)
+    rejected: list[str] = field(default_factory=list)
+
+
 def _schema(catalog: Catalog) -> dict:
-    nullable = lambda schema: {"anyOf": [schema, {"type": "null"}]}  # noqa: E731
+    def nullable(schema: dict) -> dict:
+        return {"anyOf": [schema, {"type": "null"}]}
+
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["releases", "unparsed"],
+        "required": ["releases", "unclear"],
         "properties": {
             "releases": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["product", "version", "ga_date", "platforms"],
+                    "required": ["product", "version", "platforms", "ga_date", "evidence", "ga_date_evidence"],
                     "properties": {
                         "product": {"type": "string", "enum": list(catalog.products)},
                         "version": {"type": "string"},
-                        "ga_date": nullable({"type": "string"}),
                         "platforms": nullable({
                             "type": "array",
                             "items": {"type": "string", "enum": list(catalog.platforms)},
                         }),
+                        "ga_date": nullable({"type": "string"}),
+                        "evidence": {"type": "string"},
+                        "ga_date_evidence": nullable({"type": "string"}),
                     },
                 },
             },
-            "unparsed": {"type": "array", "items": {"type": "string"}},
+            "unclear": {"type": "array", "items": {"type": "string"}},
         },
     }
 
 
-def parse_release_text(text: str, catalog: Catalog) -> tuple[list[ReleaseRequest], list[str]]:
+def _ask_claude(text: str, catalog: Catalog, today: date) -> dict:
     model = os.getenv("RELEASE_AGENT_MODEL", "claude-opus-5-5")
     client = anthropic.Anthropic()
-
     products = "\n".join(
-        f"- {key}: {p['name']} (aka {', '.join(p.get('aliases', []))}); "
+        f"- {key}: {p['name']} (also called: {', '.join(sorted(catalog.product_names(key)))}); "
         f"platforms: {', '.join(p.get('platforms', [])) or 'n/a'}"
         for key, p in catalog.products.items()
     )
-    user_prompt = f"Today is {date.today().isoformat()}.\n\nKnown products:\n{products}\n\nRequest:\n{text}"
+    user_prompt = (f"Today is {today:%A} {today.isoformat()}.\n\nKnown products:\n{products}\n\n"
+                   f"<request>\n{text}\n</request>")
 
     response = client.messages.create(
         model=model,
@@ -77,19 +99,17 @@ def parse_release_text(text: str, catalog: Catalog) -> tuple[list[ReleaseRequest
     )
     if response.stop_reason == "refusal":
         raise RuntimeError("Claude declined to parse the release request")
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError("Release request too long to parse; split it into smaller messages")
+    return json.loads(next(b.text for b in response.content if b.type == "text"))
 
-    raw = next(b.text for b in response.content if b.type == "text")
-    data = json.loads(raw)
 
-    requests_, unparsed = [], list(data.get("unparsed", []))
-    for item in data["releases"]:
-        try:
-            requests_.append(ReleaseRequest(
-                product=item["product"],
-                version=item["version"],
-                ga_date=date.fromisoformat(item["ga_date"]) if item.get("ga_date") else None,
-                platforms=item.get("platforms") or None,
-            ))
-        except ValueError as e:
-            unparsed.append(f"{item}: {e}")
-    return requests_, unparsed
+def parse_release_text(text: str, catalog: Catalog, today: date | None = None) -> IntakeResult:
+    today = today or date.today()
+    if not VERSION_TOKEN.search(text):
+        return IntakeResult(rejected=["No version number found. Example: 'SGW 4.1.4 GA Dec 10'"])
+
+    data = _ask_claude(text, catalog, today)
+    releases, rejected = ground_all(catalog, text, data.get("releases", []), today)
+    rejected += [f"Unclear: {u}" for u in data.get("unclear", [])]
+    return IntakeResult(releases=releases, rejected=rejected)

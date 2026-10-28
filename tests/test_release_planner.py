@@ -5,33 +5,7 @@ import pytest
 from src.release.catalog import Catalog
 from src.release.models import ReleaseRequest, release_type_for
 from src.release.planner import apply_plan, plan_release
-
-
-class FakeJira:
-    """In-memory stand-in for JiraClient that understands the JQL the planner sends."""
-
-    def __init__(self, issues=None):
-        self.issues = issues or []  # dicts: key, summary, type, labels, parent
-        self.created = []
-
-    def search(self, jql, fields):
-        if jql.startswith("parent = "):
-            parent = jql.split("=", 1)[1].strip()
-            hits = [i for i in self.issues if i.get("parent") == parent]
-        elif "labels =" in jql:
-            label = jql.split('labels = "', 1)[1].split('"', 1)[0]
-            hits = [i for i in self.issues if i["type"] == "Epic" and label in i.get("labels", [])]
-        else:
-            hits = [i for i in self.issues if i["type"] == "Epic" and "Release Ticket" in i["summary"]]
-        return [{"key": i["key"], "fields": {"summary": i["summary"]}} for i in hits]
-
-    def create_issue(self, project, issue_type, summary, description, labels,
-                     assignee_id=None, due_date=None, parent_key=None):
-        key = f"CM-{9000 + len(self.created)}"
-        self.issues.append({"key": key, "summary": summary, "type": issue_type,
-                            "labels": labels, "parent": parent_key})
-        self.created.append(key)
-        return key
+from tests.fakes import FakeJira
 
 
 @pytest.fixture(scope="module")

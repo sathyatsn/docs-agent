@@ -21,22 +21,25 @@ class EpicFinding:
 
 
 def audit_open_releases(catalog: Catalog, jira: JiraClient) -> list[EpicFinding]:
-    project = catalog.jira["project"]
-    epics = jira.search(
-        f'project = {project} AND issuetype = Epic AND summary ~ "Release Ticket" '
-        f"AND statusCategory != Done ORDER BY created DESC",
-        ["summary", "duedate", "assignee"],
-    )
+    epics = []
+    for project, products in catalog.projects().items():
+        for epic in jira.search(
+            f'project = {project} AND issuetype = Epic AND summary ~ "Release Ticket" '
+            f"AND statusCategory != Done ORDER BY created DESC",
+            ["summary", "duedate", "assignee"],
+        ):
+            epics.append((epic, products))
     findings: list[EpicFinding] = []
     by_release = defaultdict(list)
 
-    for epic in epics:
+    for epic, project_products in epics:
         summary = epic["fields"]["summary"]
         match = VERSION_IN_SUMMARY.search(summary)
+        product = catalog.product_for_summary(summary)
         finding = EpicFinding(
             key=epic["key"],
             summary=summary,
-            product=catalog.product_for_summary(summary),
+            product=product if product in project_products else None,
             version=match.group(1) if match else None,
         )
         findings.append(finding)

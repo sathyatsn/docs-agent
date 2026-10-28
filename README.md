@@ -114,22 +114,34 @@ See `.env.example` for all configuration options. Key settings:
 
 # Release Ticket Agent
 
-Creates the Jira release epic and its child tasks in `CM` (QE, Perf, Docs,
-Publish Builds, Web Updates, plus the full GA checklist for major releases)
-for every mobile product and platform: Couchbase Lite (Android, iOS, Java,
-C, .NET), CBL Vector Search, CBL JS, CBL React Native, Sync Gateway and Edge
-Server. Ticket content comes from `config/release_catalog.yaml`. Runs are
-dry runs unless you pass `--apply`. Re-running never creates duplicates and
-only fills in missing tickets.
+Creates the Jira release epic and its child tasks (QE, Perf, Docs, Publish
+Builds, Web Updates, plus the full GA checklist for major releases) for every
+mobile product and platform: Couchbase Lite (Android, iOS, Java, C, .NET), CBL
+Vector Search, CBL JS, CBL React Native, Sync Gateway and Edge Server. Tickets
+go in `CM` by default; any product can be pointed at another Jira project.
+
+**From Slack:** `/release SGW 4.1.4 GA Dec 10`. The bot posts the exact plan,
+showing which text each value was read from. An approver clicks **Approve**
+and the tickets are created.
+
+Guarantees:
+* Ticket content comes only from `config/release_catalog.yaml`.
+* Every value Claude extracts is checked word for word against the request,
+  and anything it can't verify is sent back to the requester.
+* Nothing is written without approval, and an approved plan is applied exactly
+  once.
+* Re-requesting a release only fills in missing tickets.
 
 ```bash
 pip install -r requirements.txt
-python release_agent.py create --product sgw --version 4.1.4 --ga 2026-12-10          # dry run
-python release_agent.py create --product cbl --version 3.4.4 --platforms dotnet --apply
-python release_agent.py train releases/example-train.yaml --show-descriptions
-python release_agent.py intake "SGW 4.1.4 and 4.0.10 GA Dec 10"
+python slack_bot.py                                                            # Slack bot (Socket Mode)
+python release_agent.py create --product sgw --version 4.1.4 --ga 2026-12-10   # CLI plan -> prints plan id
+python release_agent.py approve rp-1a2b3c4d                                    # create exactly that plan
+python release_agent.py train releases/example-train.yaml
 python release_agent.py audit
 ```
 
-Design, decisions and rollout plan: [docs/release-ticket-agent.md](docs/release-ticket-agent.md).
+Setup (Jira service account, Slack app manifest in `slack/manifest.yaml`,
+approvers), the guarantees in detail, and the rollout plan are in
+[docs/release-ticket-agent.md](docs/release-ticket-agent.md).
 Tests: `pip install -r requirements-dev.txt && pytest`.

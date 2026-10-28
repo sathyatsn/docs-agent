@@ -26,11 +26,38 @@ class ReleaseRequest:
             raise ValueError(f"Invalid version '{self.version}' (expected e.g. 4.1.3)")
         if self.release_type is None:
             self.release_type = release_type_for(self.version)
+        if self.release_type not in ("major", "maintenance"):
+            raise ValueError(f"Invalid release type '{self.release_type}'")
+
+    def to_dict(self) -> dict:
+        return {
+            "product": self.product,
+            "version": self.version,
+            "ga_date": self.ga_date.isoformat() if self.ga_date else None,
+            "platforms": self.platforms,
+            "release_type": self.release_type,
+            "epic_key": self.epic_key,
+            "qe_matrix": self.qe_matrix,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ReleaseRequest":
+        ga = data.get("ga_date")
+        return cls(
+            product=data["product"],
+            version=data["version"],
+            ga_date=date.fromisoformat(ga) if ga else None,
+            platforms=data.get("platforms"),
+            release_type=data.get("release_type"),
+            epic_key=data.get("epic_key"),
+            qe_matrix=data.get("qe_matrix") or {},
+        )
 
 
 @dataclass
 class PlannedIssue:
     task_id: str | None  # None for the epic
+    project: str
     summary: str
     description: str
     labels: list[str]
