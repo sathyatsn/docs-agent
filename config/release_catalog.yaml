@@ -18,28 +18,19 @@ jira:
   task_issue_type: Task
   agent_label: release-agent
 
-# Slack bot (slack_bot.py). Only these Slack user IDs may approve a plan and
-# create tickets; an empty list means nobody can (fail closed). Find an ID in
-# Slack via profile -> "..." -> "Copy member ID".
-slack:
-  approvers: []
-  # Optional: restrict the bot to these channel IDs. Empty = any channel it is in.
-  allowed_channels: []
-  # Pending plans expire after this many hours and must be requested again.
-  plan_ttl_hours: 24
-
-# Function -> Jira accountId. Products can override any function below.
-# null means "leave unassigned" and the plan flags it.
+# Function -> Jira user (accountId + display name, both as they appear in Jira).
+# Products can override any function below. null means "leave unassigned" and
+# the plan flags it.
 people:
-  release_manager: "712020:3e7a9a59-7b72-450f-ab04-1ee42766d17b"   # Sathya Thothathri
-  qe: "557058:63aa94c0-ee15-4840-834d-84d0cb07e20d"                # Pasin Suriyentrakorn
-  perf: "62546d49c23e5b006ab2d10d"                                 # Dragos Taraban
-  docs: "712020:8013ad17-0f53-411b-85cb-e1ceac29a04b"              # Fortune Ikechi
-  build: "557058:7a9740cb-5bb4-4901-a696-d0815b184de2"             # Ming Ho
-  web: "712020:3e7a9a59-7b72-450f-ab04-1ee42766d17b"               # Sathya Thothathri
+  release_manager: {account_id: "712020:3e7a9a59-7b72-450f-ab04-1ee42766d17b", name: Sathya Thothathri}
+  qe: {account_id: "557058:63aa94c0-ee15-4840-834d-84d0cb07e20d", name: Pasin Suriyentrakorn}
+  perf: {account_id: "62546d49c23e5b006ab2d10d", name: Dragos Taraban}
+  docs: {account_id: "712020:8013ad17-0f53-411b-85cb-e1ceac29a04b", name: Fortune Ikechi}
+  build: {account_id: "557058:7a9740cb-5bb4-4901-a696-d0815b184de2", name: Ming Ho}
+  web: {account_id: "712020:3e7a9a59-7b72-450f-ab04-1ee42766d17b", name: Sathya Thothathri}
   pm: null
   gtm: null
-  support: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4"           # Adam Fraser
+  support: {account_id: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4", name: Adam Fraser}
   legal: null
   security: null
   compliance: null
@@ -114,7 +105,7 @@ products:
     platforms: []
     process_owners: Anubhuti Sharma / Iveta Dulova
     owners:
-      qe: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4"            # Adam Fraser
+      qe: {account_id: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4", name: Adam Fraser}
     tasks:
       maintenance: [qe_signoff, perf_signoff, documentation, publish_builds, web_updates]
       major: *major_tasks
@@ -127,7 +118,7 @@ products:
     platforms: []
     process_owners: Sathya Thothathri
     owners:
-      qe: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4"            # Adam Fraser
+      qe: {account_id: "557058:6b16a808-bbc7-4ff1-8c88-73dab68a53a4", name: Adam Fraser}
     tasks:
       maintenance: [qe_signoff, perf_signoff, documentation, publish_builds, web_updates]
       major: *major_tasks
@@ -234,8 +225,6 @@ tasks:
             - {text: "Maven Central for Android, Java CE", platforms: [android, java]}
             - {text: "mobile.maven.couchbase.com for Android, Java EE", platforms: [android, java]}
             - {text: Swift Package Manager (SPM), platforms: [ios], status: "(x) [Done by Dev]"}
-            # TODO: confirm the npm publish channel names with the build team.
-            - {text: npm, platforms: [js, react_native]}
             - S3
 
   web_updates:

@@ -19,7 +19,6 @@ class Catalog:
     def __init__(self, data: dict):
         self.data = data
         self.jira = data["jira"]
-        self.slack = data.get("slack") or {}
         self.people = data.get("people", {})
         self.platforms = data.get("platforms", {})
         self.products = data["products"]
@@ -45,6 +44,11 @@ class Catalog:
                 raise ValueError(f"{key}: unsupported jira settings {sorted(unknown)}")
             if not PROJECT_KEY_RE.match(self.jira_for(key)["project"]):
                 raise ValueError(f"{key}: invalid Jira project key '{self.jira_for(key)['project']}'")
+        people = [("people", f, p) for f, p in self.people.items()]
+        people += [(k, f, p) for k, prod in self.products.items() for f, p in prod.get("owners", {}).items()]
+        for where, function, person in people:
+            if person is not None and not (isinstance(person, dict) and person.get("account_id") and person.get("name")):
+                raise ValueError(f"{where}/{function}: owner must be null or {{account_id, name}}")
         for task_id, task in self.tasks.items():
             if task["owner"] not in self.people:
                 raise ValueError(f"task '{task_id}': unknown owner function '{task['owner']}'")
@@ -119,7 +123,8 @@ class Catalog:
             return ()
         return tuple(sorted(self.platforms_mentioned(product_key, summary)))
 
-    def owner_for(self, product_key: str, function: str) -> str | None:
+    def owner_for(self, product_key: str, function: str) -> dict | None:
+        """{account_id, name} of whoever owns `function` for this product, or None if unassigned."""
         overrides = self.products[product_key].get("owners", {})
         if function in overrides:
             return overrides[function]

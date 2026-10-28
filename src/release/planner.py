@@ -1,15 +1,13 @@
 import hashlib
 import json
-import logging
 import re
 from datetime import timedelta
 
 from src.release.catalog import Catalog
-from src.release.jira_client import JiraClient
+from src.release.jira_reader import JiraReader
 from src.release.models import PlannedIssue, ReleasePlan, ReleaseRequest
 from src.release.render import render_epic, render_task
 
-logger = logging.getLogger(__name__)
 
 
 def release_scope(catalog: Catalog, request: ReleaseRequest) -> tuple[str, ...]:
@@ -41,7 +39,7 @@ def _display_title(catalog: Catalog, request: ReleaseRequest, platforms: list[st
     return title
 
 
-def find_existing_epics(jira: JiraClient, catalog: Catalog, request: ReleaseRequest) -> list[dict]:
+def find_existing_epics(jira: JiraReader, catalog: Catalog, request: ReleaseRequest) -> list[dict]:
     """Find release epics for this product+version, whether the agent or a human created them."""
     project = catalog.jira_for(request.product)["project"]
     scope = release_scope(catalog, request)
@@ -66,7 +64,7 @@ def find_existing_epics(jira: JiraClient, catalog: Catalog, request: ReleaseRequ
     return list(found.values())
 
 
-def plan_release(catalog: Catalog, request: ReleaseRequest, jira: JiraClient | None = None) -> ReleasePlan:
+def plan_release(catalog: Catalog, request: ReleaseRequest, jira: JiraReader | None = None) -> ReleasePlan:
     """Build the full ticket set for a release, then mark whatever already exists in Jira."""
     if request.product not in catalog.products:
         raise KeyError(f"Unknown product '{request.product}'")
@@ -86,13 +84,15 @@ def plan_release(catalog: Catalog, request: ReleaseRequest, jira: JiraClient | N
     if request.ga_date:
         epic_summary += f" - GA {request.ga_date:%b %-d, %Y}"
 
+    manager = catalog.owner_for(request.product, "release_manager")
     epic = PlannedIssue(
         task_id=None,
         project=project,
         summary=epic_summary,
         description=render_epic(catalog, request, platforms),
         labels=labels,
-        assignee_id=catalog.owner_for(request.product, "release_manager"),
+        assignee_id=(manager or {}).get("account_id"),
+        assignee_name=(manager or {}).get("name"),
         owner_function="release_manager",
         due_date=request.ga_date,
     )
@@ -103,8 +103,8 @@ def plan_release(catalog: Catalog, request: ReleaseRequest, jira: JiraClient | N
         summary = f"{task['summary']} - {title} {request.version}"
         if task_id in product.get("not_applicable", []):
             summary += " - N/A"
-        assignee = catalog.owner_for(request.product, task["owner"])
-        if not assignee:
+        owner = catalog.owner_for(request.product, task["owner"])
+        if not owner:
             plan.warnings.append(f"No owner configured for '{task['owner']}' ({task['summary']}); left unassigned")
         due = request.ga_date + timedelta(days=task.get("due_offset_days", 0)) if request.ga_date else None
         plan.tasks.append(PlannedIssue(
@@ -113,19 +113,20 @@ def plan_release(catalog: Catalog, request: ReleaseRequest, jira: JiraClient | N
             summary=summary,
             description=render_task(catalog, task_id, request, platforms),
             labels=labels,
-            assignee_id=assignee,
+            assignee_id=(owner or {}).get("account_id"),
+            assignee_name=(owner or {}).get("name"),
             owner_function=task["owner"],
             due_date=due,
         ))
 
     if not request.ga_date:
-        plan.warnings.append("No GA date given: epic title and due dates will be blank")
+        plan.warnings.append("No GA date given: new tickets will have no GA in the title and no due dates")
     if jira:
         _reconcile(plan, catalog, jira)
     return plan
 
 
-def _reconcile(plan: ReleasePlan, catalog: Catalog, jira: JiraClient) -> None:
+def _reconcile(plan: ReleasePlan, catalog: Catalog, jira: JiraReader) -> None:
     request = plan.request
     if request.epic_key:
         epic_key = request.epic_key
@@ -144,47 +145,16 @@ def _reconcile(plan: ReleasePlan, catalog: Catalog, jira: JiraClient) -> None:
                              f"('{existing[0]['fields']['summary']}'); only missing tasks will be added")
 
     plan.epic.existing_key = epic_key
+    if not request.epic_key:
+        plan.epic.existing_summary = existing[0]["fields"]["summary"]
     children = jira.search(f"parent = {epic_key}", ["summary"])
     for task in plan.tasks:
         prefix = _normalize(catalog.tasks[task.task_id]["summary"])
         for child in children:
             if _normalize(child["fields"]["summary"]).startswith(prefix):
                 task.existing_key = child["key"]
+                task.existing_summary = child["fields"]["summary"]
                 break
-
-
-def apply_plan(plan: ReleasePlan, catalog: Catalog, jira: JiraClient,
-               created: list[str] | None = None) -> list[str]:
-    """Create every planned issue that does not exist yet. Returns the new keys.
-
-    Keys are appended to `created` as each issue is made, so a caller still knows
-    what exists if Jira fails part-way through.
-    """
-    if plan.blocked:
-        raise RuntimeError("Plan is blocked: " + "; ".join(plan.warnings))
-    jira_cfg = catalog.jira_for(plan.request.product)
-    created = [] if created is None else created
-    start = len(created)
-
-    epic = plan.epic
-    if epic.is_new:
-        epic.existing_key = jira.create_issue(
-            epic.project, jira_cfg["epic_issue_type"], epic.summary, epic.description,
-            epic.labels, epic.assignee_id, epic.due_date,
-        )
-        created.append(epic.existing_key)
-        logger.info("Created epic %s: %s", epic.existing_key, epic.summary)
-
-    for task in plan.tasks:
-        if not task.is_new:
-            continue
-        task.existing_key = jira.create_issue(
-            task.project, jira_cfg["task_issue_type"], task.summary, task.description,
-            task.labels, task.assignee_id, task.due_date, parent_key=epic.existing_key,
-        )
-        created.append(task.existing_key)
-        logger.info("Created task %s: %s", task.existing_key, task.summary)
-    return created[start:]
 
 
 def plan_fingerprint(plans: list[ReleasePlan]) -> str:

@@ -39,3 +39,22 @@ class FakeJira:
 
     def browse_url(self, key):
         return f"https://jira.example/browse/{key}"
+
+
+def create_from_plan(plan, jira: FakeJira) -> list[str]:
+    """Create a plan's missing issues the way the skill instructs Claude to: epic first, then tasks."""
+    if plan.blocked:
+        raise RuntimeError("Plan is blocked")
+    created = []
+    epic = plan.epic
+    if epic.is_new:
+        epic.existing_key = jira.create_issue(epic.project, "Epic", epic.summary, epic.description,
+                                              epic.labels, epic.assignee_id, epic.due_date)
+        created.append(epic.existing_key)
+    for task in plan.tasks:
+        if task.is_new:
+            task.existing_key = jira.create_issue(task.project, "Task", task.summary, task.description,
+                                                  task.labels, task.assignee_id, task.due_date,
+                                                  parent_key=epic.existing_key)
+            created.append(task.existing_key)
+    return created

@@ -112,36 +112,24 @@ See `.env.example` for all configuration options. Key settings:
 
 ---
 
-# Release Ticket Agent
+# Release tickets skill
 
-Creates the Jira release epic and its child tasks (QE, Perf, Docs, Publish
-Builds, Web Updates, plus the full GA checklist for major releases) for every
-mobile product and platform: Couchbase Lite (Android, iOS, Java, C, .NET), CBL
-Vector Search, CBL JS, CBL React Native, Sync Gateway and Edge Server. Tickets
-go in `CM` by default; any product can be pointed at another Jira project.
+Ask Claude in one sentence, for example *"Create the release tickets for SGW
+4.1.4 GA Dec 10"*, and it creates the Jira release epic and child tasks
+(QE, Perf, Docs, Publish Builds, Web Updates, plus the full GA checklist for
+major releases). It covers Couchbase Lite (Android, iOS, Java, C, .NET), CBL
+Vector Search, CBL JS, CBL React Native, Sync Gateway and Edge Server.
 
-**From Slack:** `/release SGW 4.1.4 GA Dec 10`. The bot posts the exact plan,
-showing which text each value was read from. An approver clicks **Approve**
-and the tickets are created.
-
-Guarantees:
+It works through the Atlassian connector in Claude: no API keys, tokens or
+bots.
 * Ticket content comes only from `config/release_catalog.yaml`.
-* Every value Claude extracts is checked word for word against the request,
-  and anything it can't verify is sent back to the requester.
-* Nothing is written without approval, and an approved plan is applied exactly
-  once.
-* Re-requesting a release only fills in missing tickets.
+* Every detail in the prompt is checked against the prompt's own words.
+* Nothing is created until you reply "yes" to the plan.
+* Created issues are read back and checked against the plan.
 
-```bash
-pip install -r requirements.txt
-python slack_bot.py                                                            # Slack bot (Socket Mode)
-python release_agent.py create --product sgw --version 4.1.4 --ga 2026-12-10   # CLI plan -> prints plan id
-python release_agent.py approve rp-1a2b3c4d                                    # create exactly that plan
-python release_agent.py train releases/example-train.yaml
-python release_agent.py audit
-```
-
-Setup (Jira service account, Slack app manifest in `slack/manifest.yaml`,
-approvers), the guarantees in detail, and the rollout plan are in
-[docs/release-ticket-agent.md](docs/release-ticket-agent.md).
-Tests: `pip install -r requirements-dev.txt && pytest`.
+- Skill: `.claude/skills/release-tickets/` (Claude Code picks it up automatically
+  in this repo). For Claude on the web or desktop, run
+  `python scripts/build_skill.py` and upload `dist/release-tickets.zip`.
+- Preview a release offline: `python release_agent.py preview --product sgw --version 4.1.4 --ga 2026-12-10`
+- Design, guarantees and rollout: [docs/release-ticket-agent.md](docs/release-ticket-agent.md)
+- Tests: `pip install -r requirements-dev.txt && pytest`

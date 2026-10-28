@@ -62,9 +62,11 @@ class PlannedIssue:
     description: str
     labels: list[str]
     assignee_id: str | None = None
+    assignee_name: str | None = None
     owner_function: str | None = None
     due_date: date | None = None
     existing_key: str | None = None  # already in Jira -> nothing to create
+    existing_summary: str | None = None  # its summary as it is in Jira
 
     @property
     def is_new(self) -> bool:

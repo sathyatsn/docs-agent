@@ -1,6 +1,5 @@
 # Example release train: every release that ships together, in one file.
-#   python release_agent.py train releases/example-train.yaml          # dry run
-#   python release_agent.py train releases/example-train.yaml --apply  # create
+#   python release_agent.py train releases/example-train.yaml   # offline preview
 # Top-level keys are defaults for every entry below.
 ga_date: 2026-12-10
 

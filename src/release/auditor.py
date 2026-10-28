@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from src.release.catalog import Catalog
-from src.release.jira_client import JiraClient
+from src.release.jira_reader import JiraReader
 from src.release.models import release_type_for
 
 VERSION_IN_SUMMARY = re.compile(r"(?<![\d.])(\d+\.\d+(?:\.\d+){0,2})(?![\d.])")
@@ -20,7 +20,7 @@ class EpicFinding:
     issues: list[str] = field(default_factory=list)
 
 
-def audit_open_releases(catalog: Catalog, jira: JiraClient) -> list[EpicFinding]:
+def audit_open_releases(catalog: Catalog, jira: JiraReader) -> list[EpicFinding]:
     epics = []
     for project, products in catalog.projects().items():
         for epic in jira.search(

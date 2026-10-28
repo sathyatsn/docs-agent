@@ -4,8 +4,8 @@ import pytest
 
 from src.release.catalog import Catalog
 from src.release.models import ReleaseRequest, release_type_for
-from src.release.planner import apply_plan, plan_release
-from tests.fakes import FakeJira
+from src.release.planner import plan_release
+from tests.fakes import FakeJira, create_from_plan
 
 
 @pytest.fixture(scope="module")
@@ -62,11 +62,11 @@ def test_platform_scoped_release_marks_other_platforms_na(catalog):
     plan = plan_release(catalog, req)
     assert plan.epic.summary.startswith("CBL .NET Maintenance Release Ticket - 4.1.4")
     publish = next(t for t in plan.tasks if t.task_id == "publish_builds").description
-    assert "|NuGet for .NET|(x)|" in publish
-    assert "|Carthage, Cocoapods for iOS|NA (platform not in this release)|" in publish
-    assert "|S3|(x)|" in publish
+    assert "| NuGet for .NET | ❌ |" in publish
+    assert "| Carthage, Cocoapods for iOS | NA (platform not in this release) |" in publish
+    assert "| S3 | ❌ |" in publish
     qe = next(t for t in plan.tasks if t.task_id == "qe_signoff").description
-    assert "|.NET|TBD|" in qe and "|iOS|" not in qe
+    assert "| .NET | TBD |" in qe and "| iOS |" not in qe
 
 
 def test_major_release_uses_full_task_list(catalog):
@@ -80,7 +80,7 @@ def test_major_release_uses_full_task_list(catalog):
 def test_new_release_creates_epic_then_children(catalog):
     jira = FakeJira()
     plan = plan_release(catalog, ReleaseRequest(product="edge-server", version="1.0.3"), jira)
-    created = apply_plan(plan, catalog, jira)
+    created = create_from_plan(plan, jira)
     assert len(created) == 6
     epic_key = created[0]
     assert all(i["parent"] == epic_key for i in jira.issues[1:])
@@ -89,7 +89,7 @@ def test_new_release_creates_epic_then_children(catalog):
 def test_rerun_is_idempotent(catalog):
     jira = FakeJira()
     req = ReleaseRequest(product="sgw", version="4.1.4")
-    apply_plan(plan_release(catalog, req, jira), catalog, jira)
+    create_from_plan(plan_release(catalog, req, jira), jira)
     second = plan_release(catalog, ReleaseRequest(product="sgw", version="4.1.4"), jira)
     assert second.to_create == []
 
@@ -105,7 +105,7 @@ def test_existing_manual_epic_only_gets_missing_tasks(catalog):
     plan = plan_release(catalog, ReleaseRequest(product="sgw", version="4.1.3"), jira)
     assert plan.epic.existing_key == "CM-1827"
     assert {t.task_id for t in plan.to_create} == {"perf_signoff", "documentation", "publish_builds"}
-    apply_plan(plan, catalog, jira)
+    create_from_plan(plan, jira)
     assert {i["parent"] for i in jira.issues if i["key"] in jira.created} == {"CM-1827"}
 
 
@@ -117,7 +117,7 @@ def test_duplicate_epics_block_the_plan(catalog):
     plan = plan_release(catalog, ReleaseRequest(product="cbl-rn", version="1.1.2"), jira)
     assert plan.blocked
     with pytest.raises(RuntimeError):
-        apply_plan(plan, catalog, jira)
+        create_from_plan(plan, jira)
     assert jira.created == []
 
 
